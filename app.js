@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.2.0';
+  var VERSION = '1.3.0';
   var KEY = 'alnaeem-stock-v1';
   var BAR_SIZES = [1, 2.5, 5, 10, 15.55, 20, 31.1, 50, 100];
   var DEFAULT_TABLES = [
@@ -99,7 +99,7 @@
   }
   function fresh() {
     var t = clone(DEFAULT_TABLES);
-    return { v: 1, tables: t, counts: blankCounts(t), date: todayISO(), updatedAt: null, mode: 'owner', pinHash: null, ownerPhone: '', history: [], received: {}, lastPasteHash: '' };
+    return { v: 1, tables: t, counts: blankCounts(t), date: todayISO(), updatedAt: null, mode: 'owner', pinHash: null, ownerPhone: '', history: [], received: {}, lastPasteHash: '', ticks: {} };
   }
   function load() {
     try {
@@ -110,6 +110,7 @@
         raw.date = raw.date || todayISO();
         raw.history = Array.isArray(raw.history) ? raw.history : [];
         raw.received = raw.received || {};
+        raw.ticks = raw.ticks || {};
         return raw;
       }
     } catch (e) { /* fall through */ }
@@ -172,7 +173,8 @@
     h += '<header class="hdr">';
     h += '<div class="brand"><div class="badge">' + diamond(32) + '</div><div class="brand-text"><div class="brand-name">Al Naeem Jewellery L.L.C.</div><div class="brand-sub">24K BULLION STOCK COUNT</div></div>';
     h += '<button class="icon-btn" data-act="settings" aria-label="Settings">' + ico('gear', '#F3E9D2', 20) + '</button></div>';
-    if (staff) h += '<div class="staff-pill">' + S.mode + ' · ' + shopName(S.mode).toUpperCase() + ' COUNT</div>';
+    if (staff) h += '<div class="staff-pill">' + S.mode + ' · ' + shopName(S.mode).toUpperCase() + ' COUNT</div>' +
+      '<div class="tprog"><div class="tbar"><i data-tickbar></i></div><span data-ticks></span></div>';
     h += '<div class="daterow"><span>Count date</span><label class="datebtn"><span id="dateTxt">' + esc(dateLong(S.date)) + '</span>' + ico('chev', '#F3E9D2', 16) +
          '<input type="date" id="countDate" value="' + esc(S.date) + '" aria-label="Count date"></label></div>';
     if (!staff) {
@@ -180,7 +182,7 @@
            '<button class="btn btn-gold-o" data-act="pdf">' + ico('pdf', '#F3E9D2') + 'Save PDF</button>' +
            '<button class="btn btn-gold-o hist-btn" data-act="history" aria-label="Past counts">' + ico('history', '#F3E9D2', 20) + '</button></div>';
     } else {
-      h += '<button class="btn btn-gold btn-full" data-act="staff-send">' + ico('send', '#064E3B') + 'Send count on WhatsApp</button>';
+      h += '<button class="btn btn-gold btn-full" data-act="staff-send">' + ico('send', 'currentColor') + '<span class="send-label">Send count on WhatsApp</span></button>';
     }
     h += '</header>';
 
@@ -210,7 +212,7 @@
     S.tables.forEach(function (t) { h += tableHTML(t, staff); });
 
     if (staff) {
-      h += '<div class="staff-actions"><button class="btn btn-gold btn-full" data-act="staff-send">' + ico('send', '#064E3B') + 'Send count on WhatsApp</button>' +
+      h += '<div class="staff-actions"><button class="btn btn-gold btn-full" data-act="staff-send">' + ico('send', 'currentColor') + '<span class="send-label">Send count on WhatsApp</span></button>' +
            '<button class="btn btn-light btn-full" data-act="staff-copy">' + ico('copy') + 'Copy message</button></div>';
     }
     h += '<button class="btn btn-danger btn-full" data-act="new-count">' + ico('trash', '#B42318') + 'New count (clear all numbers)</button>';
@@ -230,20 +232,24 @@
     if (!staff) h += '<button class="sbtn" data-act="share-table" data-t="' + t.id + '">' + ico('camera', '#047857') + 'Share</button>';
     h += '</div></div>';
     if (staff) {
-      h += '<div class="cols"><span>SIZE</span><span class="c">' + S.mode + ' PIECES</span><span class="r">GRAMS</span></div>';
+      h += '<div class="cols"><span class="c">DONE</span><span>SIZE</span><span class="c">' + S.mode + ' PIECES</span><span class="r">GRAMS</span></div>';
     } else {
       h += '<div class="cols"><span>SIZE</span><span class="c">HO</span><span class="c">BR</span><span class="c">PCS</span><span class="r">GRAMS</span></div>';
     }
     t.sizes.forEach(function (s) {
       var k = key(s), c = S.counts[t.id][k], sub = sizeSub(s);
-      h += '<div class="row">';
+      var ticked = staff && isTicked(t.id, k);
+      h += '<div class="row' + (ticked ? ' done' : '') + '">';
+      if (staff) h += '<button class="tick' + (ticked ? ' on' : '') + '" data-act="tick" data-t="' + t.id + '" data-k="' + k + '" aria-pressed="' + ticked + '" aria-label="Mark ' + sizeLabel(s) + ' as counted">' + ico('check', 'currentColor', 18) + '</button>';
       h += '<div class="size">' + (ed ? '<button class="rm" data-act="remove-size" data-t="' + t.id + '" data-k="' + k + '" aria-label="Remove ' + sizeLabel(s) + '">' + ico('minus', '#B42318', 16) + '</button>' : '') +
            '<div><b>' + sizeLabel(s) + '</b>' + (sub ? '<small>' + sub + '</small>' : '') + '</div></div>';
       var shops = staff ? [S.mode.toLowerCase()] : ['ho', 'br'];
       shops.forEach(function (sh) {
         var v = c[sh];
+        if (staff) h += '<div class="stepper"><button class="stp" data-act="step" data-d="-1" data-t="' + t.id + '" data-k="' + k + '" data-s="' + sh + '" aria-label="One less ' + sizeLabel(s) + '">' + ico('minus', 'currentColor', 20) + '</button>';
         h += '<input class="cnt" type="text" inputmode="numeric" pattern="[0-9]*" enterkeyhint="next" autocomplete="off" placeholder="0" ' +
              'data-t="' + t.id + '" data-k="' + k + '" data-s="' + sh + '" value="' + (v ? v : '') + '" aria-label="' + (sh === 'ho' ? 'Head office' : 'Branch') + ' pieces, ' + esc(t.title) + ' ' + sizeLabel(s) + '">';
+        if (staff) h += '<button class="stp" data-act="step" data-d="1" data-t="' + t.id + '" data-k="' + k + '" data-s="' + sh + '" aria-label="One more ' + sizeLabel(s) + '">' + ico('plus', 'currentColor', 20) + '</button></div>';
       });
       if (!staff) h += '<span class="pcs" data-out="r:' + t.id + ':' + k + ':pcs"></span>';
       h += '<span class="grams" data-out="r:' + t.id + ':' + k + ':' + (staff ? S.mode.toLowerCase() + 'g' : 'tg') + '"></span>';
@@ -254,7 +260,7 @@
     h += '<div class="foot">';
     if (staff) {
       var sh = S.mode.toLowerCase();
-      h += '<div class="tot"><span>Total</span><span class="c" data-out="t:' + t.id + ':' + sh + '"></span><span class="grams" data-out="t:' + t.id + ':' + sh + 'g"></span></div>';
+      h += '<div class="tot"><span></span><span>Total</span><span class="c" data-out="t:' + t.id + ':' + sh + '"></span><span class="grams" data-out="t:' + t.id + ':' + sh + 'g"></span></div>';
     } else {
       h += '<div class="tot"><span>Total</span><span class="c" data-out="t:' + t.id + ':ho"></span><span class="c" data-out="t:' + t.id + ':br"></span><span class="c" data-out="t:' + t.id + ':pcs"></span><span class="grams" data-out="t:' + t.id + ':tg"></span></div>';
       h += '<p>Grams by shop: <strong>HO <span data-out="t:' + t.id + ':hog"></span></strong> · <strong>BR <span data-out="t:' + t.id + ':brg"></span></strong></p>';
@@ -279,7 +285,22 @@
     }
     return '';
   }
+  function isTicked(tid, k) { return !!(S.ticks && S.ticks[tid] && S.ticks[tid][k]); }
+  function tickStats() {
+    var n = 0, d = 0;
+    S.tables.forEach(function (t) { t.sizes.forEach(function (s) { n++; if (isTicked(t.id, key(s))) d++; }); });
+    return { n: n, d: d };
+  }
+  function updateTicks() {
+    if (!isStaff()) return;
+    var st = tickStats(), all = st.n > 0 && st.d === st.n;
+    $$('[data-ticks]').forEach(function (el) { el.textContent = all ? 'All ' + st.n + ' rows counted – ready to send' : 'Counted ' + st.d + ' of ' + st.n + ' rows'; });
+    $$('[data-tickbar]').forEach(function (el) { el.style.width = (st.n ? Math.round(st.d / st.n * 100) : 0) + '%'; el.classList.toggle('full', all); });
+    $$('[data-act="staff-send"],[data-act="staff-copy"]').forEach(function (b) { b.disabled = !all; });
+    $$('.send-label').forEach(function (el) { el.textContent = all ? 'Send count on WhatsApp' : 'Tick every row to send (' + st.d + '/' + st.n + ')'; });
+  }
   function updateAll() {
+    updateTicks();
     var cache = {};
     $$('[data-out]').forEach(function (el) {
       var k = el.getAttribute('data-out');
@@ -357,6 +378,25 @@
       case 'jump': var el = $('#tbl-' + tid); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); break;
       case 'paste': openPaste(); break;
       case 'quick-paste': quickPaste(); break;
+      case 'tick': {
+        var kk = b.getAttribute('data-k');
+        S.ticks = S.ticks || {}; S.ticks[tid] = S.ticks[tid] || {};
+        var on = !S.ticks[tid][kk];
+        if (on) S.ticks[tid][kk] = true; else delete S.ticks[tid][kk];
+        b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
+        b.closest('.row').classList.toggle('done', on);
+        persist(); updateTicks();
+        break;
+      }
+      case 'step': {
+        var k2 = b.getAttribute('data-k'), sh2 = b.getAttribute('data-s');
+        var n2 = Math.max(0, Math.min(99999, S.counts[tid][k2][sh2] + (+b.getAttribute('data-d'))));
+        S.counts[tid][k2][sh2] = n2;
+        var inp = $('.cnt[data-t="' + tid + '"][data-k="' + k2 + '"][data-s="' + sh2 + '"]');
+        if (inp) inp.value = n2 ? n2 : '';
+        touch(); updateAll();
+        break;
+      }
       case 'history': openHistory(); break;
       case 'share-report': shareImage(null); break;
       case 'share-table': shareImage(tid); break;
@@ -431,6 +471,7 @@
     function doIt() {
       t.sizes = t.sizes.filter(function (s) { return key(s) !== k; });
       delete S.counts[tid][k];
+      if (S.ticks && S.ticks[tid]) delete S.ticks[tid][k];
       touch(); render(); toast(fmtNum(+k) + ' g removed');
     }
     if (c.ho || c.br) confirmSheet('Remove ' + fmtNum(+k) + ' g?', 'This size has ' + (c.ho + c.br) + ' pieces counted. Removing it deletes those numbers too.', 'Remove', true, doIt);
@@ -446,6 +487,7 @@
         if (S.history.length > 104) S.history.length = 104;
       }
       S.received = {};
+      S.ticks = {};
       S.counts = blankCounts(S.tables);
       S.date = todayISO();
       touch(); render(); window.scrollTo(0, 0); toast('New count started');
@@ -715,6 +757,7 @@
     return P.buildStaffMessage(S.tables, counts, S.mode, dateShort(S.date) + ', ' + timeNow());
   }
   function staffSend() {
+    var st = tickStats(); if (st.d < st.n) { toast('Tick every row first (' + st.d + '/' + st.n + ')'); return; }
     var msg = staffMessage();
     if (S.ownerPhone) { window.location.href = 'https://wa.me/' + S.ownerPhone + '?text=' + encodeURIComponent(msg); return; }
     if (navigator.share) {
