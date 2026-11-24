@@ -1,5 +1,5 @@
 /* Offline support: serve from the phone's cache first, refresh it in the background. */
-var CACHE = 'alnaeem-stock-v2';
+var CACHE = 'alnaeem-stock-v3';
 var ASSETS = ['./', './index.html', './styles.css', './parser.js', './report.js', './app.js', './manifest.webmanifest',
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/favicon-32.png'];
 

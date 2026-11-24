@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.1.0';
+  var VERSION = '1.2.0';
   var KEY = 'alnaeem-stock-v1';
   var BAR_SIZES = [1, 2.5, 5, 10, 15.55, 20, 31.1, 50, 100];
   var DEFAULT_TABLES = [
@@ -78,6 +78,8 @@
       copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
       download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>',
       lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+      clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+      history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
       trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>'
     };
     return '<svg width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="' + c + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths[name] + '</svg>';
@@ -97,7 +99,7 @@
   }
   function fresh() {
     var t = clone(DEFAULT_TABLES);
-    return { v: 1, tables: t, counts: blankCounts(t), date: todayISO(), updatedAt: null, mode: 'owner', pinHash: null, ownerPhone: '' };
+    return { v: 1, tables: t, counts: blankCounts(t), date: todayISO(), updatedAt: null, mode: 'owner', pinHash: null, ownerPhone: '', history: [], received: {}, lastPasteHash: '' };
   }
   function load() {
     try {
@@ -106,6 +108,8 @@
         raw.counts = blankCounts(raw.tables, raw.counts);
         raw.mode = raw.mode || 'owner';
         raw.date = raw.date || todayISO();
+        raw.history = Array.isArray(raw.history) ? raw.history : [];
+        raw.received = raw.received || {};
         return raw;
       }
     } catch (e) { /* fall through */ }
@@ -120,20 +124,42 @@
   function tableById(id) { for (var i = 0; i < S.tables.length; i++) if (S.tables[i].id === id) return S.tables[i]; return null; }
 
   /* ---------- totals (all exact, grams kept in hundredths) ---------- */
-  function rowCalc(t, s) {
-    var c = S.counts[t.id][key(s)], h = hund(s);
+  function rowCalc(t, s, counts) {
+    var c = (counts || S.counts)[t.id][key(s)] || { ho: 0, br: 0 }, h = hund(s);
     return { ho: c.ho, br: c.br, pcs: c.ho + c.br, hoH: c.ho * h, brH: c.br * h, tH: (c.ho + c.br) * h };
   }
-  function tableCalc(t) {
+  function tableCalc(t, counts) {
     var o = { ho: 0, br: 0, pcs: 0, hoH: 0, brH: 0, tH: 0 };
-    t.sizes.forEach(function (s) { var r = rowCalc(t, s); for (var k in o) o[k] += r[k]; });
+    t.sizes.forEach(function (s) { var r = rowCalc(t, s, counts); for (var k in o) o[k] += r[k]; });
     return o;
   }
-  function allCalc() {
+  function allCalc(src) {
+    src = src || S;
     var o = { ho: 0, br: 0, pcs: 0, hoH: 0, brH: 0, tH: 0 };
-    S.tables.forEach(function (t) { var r = tableCalc(t); for (var k in o) o[k] += r[k]; });
+    src.tables.forEach(function (t) { var r = tableCalc(t, src.counts); for (var k in o) o[k] += r[k]; });
     return o;
   }
+
+  /* ---------- last count (for big-change warnings) ---------- */
+  function prevCount() { return S.history && S.history.length ? S.history[0] : null; }
+  function prevVal(tid, k, sh) {
+    var p = prevCount();
+    if (!p || !p.counts[tid] || !p.counts[tid][k]) return null;
+    return p.counts[tid][k][sh] | 0;
+  }
+  function isJump(oldV, newV) {
+    if (oldV === null || !newV) return false;
+    if (oldV === 0) return newV >= 10;
+    var d = Math.abs(newV - oldV);
+    return d >= 5 && d >= oldV * 0.5;
+  }
+  function colTotal(sh) {
+    var n = 0, l = sh.toLowerCase();
+    S.tables.forEach(function (t) { t.sizes.forEach(function (s) { n += S.counts[t.id][key(s)][l]; }); });
+    return n;
+  }
+  function hashStr(t) { var h = 5381; t = String(t).trim(); for (var i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return String(h >>> 0); }
+  function stampLabel(iso) { var d = new Date(iso); return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear() + ', ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
 
   /* ---------- rendering ---------- */
   function isStaff() { return S.mode === 'HO' || S.mode === 'BR'; }
@@ -151,7 +177,8 @@
          '<input type="date" id="countDate" value="' + esc(S.date) + '" aria-label="Count date"></label></div>';
     if (!staff) {
       h += '<div class="hdr-actions"><button class="btn btn-gold" data-act="share-report">' + ico('share', '#064E3B') + 'Share report</button>' +
-           '<button class="btn btn-gold-o" data-act="pdf">' + ico('pdf', '#F3E9D2') + 'Save PDF</button></div>';
+           '<button class="btn btn-gold-o" data-act="pdf">' + ico('pdf', '#F3E9D2') + 'Save PDF</button>' +
+           '<button class="btn btn-gold-o hist-btn" data-act="history" aria-label="Past counts">' + ico('history', '#F3E9D2', 20) + '</button></div>';
     } else {
       h += '<button class="btn btn-gold btn-full" data-act="staff-send">' + ico('send', '#064E3B') + 'Send count on WhatsApp</button>';
     }
@@ -159,6 +186,12 @@
 
     h += '<main class="wrap' + (staff ? ' staffmode' : '') + '">';
     if (!staff) {
+      h += '<div id="clipBanner"></div>';
+      h += '<div class="recv" aria-label="Counts received">' + ['HO', 'BR'].map(function (sh) {
+        var r = S.received && S.received[sh];
+        return r ? '<div class="rchip ok">' + ico('check', '#067647', 18) + '<span><b>' + sh + ' received</b>' + timeOf(r.at) + ' · ' + r.pcs + ' pcs</span></div>'
+                 : '<button class="rchip wait" data-act="quick-paste">' + ico('clock', '#6B655A', 18) + '<span><b>' + sh + ' waiting</b>Tap to paste</span></button>';
+      }).join('') + '</div>';
       h += '<section class="card sum" aria-label="Summary"><div class="sum-label">Total 24K stock · both shops</div>';
       h += '<div class="sum-big"><b data-out="a:tg"></b><span><span data-out="a:pcs"></span> pcs</span></div>';
       h += '<div class="shops"><div class="shop"><small>HEAD OFFICE · HO</small><b data-out="a:hog"></b><span><span data-out="a:ho"></span> pcs</span></div>' +
@@ -168,7 +201,7 @@
         h += '<button class="cat" data-act="jump" data-t="' + t.id + '"><span>' + esc(t.title) + '</span><b><span data-out="t:' + t.id + ':tg"></span> <i>· <span data-out="t:' + t.id + ':pcs"></span> pcs</i></b></button>';
       });
       h += '</div></section>';
-      h += '<button class="paste-cta" data-act="paste">' + ico('clip', '#047857', 26) + '<span><b>Paste staff message</b><span>Fills the HO or BR column from a WhatsApp message</span></span></button>';
+      h += '<button class="paste-cta" data-act="quick-paste">' + ico('clip', '#047857', 26) + '<span><b>Paste &amp; fill staff message</b><span>Copy their WhatsApp message, then tap here</span></span></button>';
     }
     h += '<nav class="tabs" aria-label="Tables">';
     S.tables.forEach(function (t, i) { h += '<button class="tab' + (i === 0 ? ' on' : '') + '" data-act="jump" data-t="' + t.id + '">' + esc(t.short) + '</button>'; });
@@ -186,6 +219,7 @@
     app.innerHTML = h;
     updateAll();
     setupTabsObserver();
+    checkClipboard();
   }
 
   function tableHTML(t, staff) {
@@ -213,6 +247,7 @@
       });
       if (!staff) h += '<span class="pcs" data-out="r:' + t.id + ':' + k + ':pcs"></span>';
       h += '<span class="grams" data-out="r:' + t.id + ':' + k + ':' + (staff ? S.mode.toLowerCase() + 'g' : 'tg') + '"></span>';
+      h += '<small class="jump" hidden data-jump="' + t.id + ':' + k + ':' + shops.join(',') + '"></small>';
       h += '</div>';
     });
     h += '<button class="add" data-act="add-size" data-t="' + t.id + '">' + ico('plus', '#047857', 16) + 'Add size</button>';
@@ -250,6 +285,20 @@
       var k = el.getAttribute('data-out');
       if (!(k in cache)) cache[k] = outValue(k);
       if (el.textContent !== cache[k]) el.textContent = cache[k];
+    });
+    $$('.cnt').forEach(function (el) {
+      var t = el.getAttribute('data-t'), k = el.getAttribute('data-k'), sh = el.getAttribute('data-s');
+      el.classList.toggle('warn', isJump(prevVal(t, k, sh), S.counts[t][k][sh]));
+    });
+    $$('[data-jump]').forEach(function (el) {
+      var p = el.getAttribute('data-jump').split(':'), parts = [];
+      p[2].split(',').forEach(function (sh) {
+        var o = prevVal(p[0], p[1], sh), n = S.counts[p[0]][p[1]][sh];
+        if (isJump(o, n)) parts.push(sh.toUpperCase() + ' last count ' + o + ' → now ' + n);
+      });
+      var txt = parts.length ? 'Big change – please check: ' + parts.join(' · ') : '';
+      if (el.textContent !== txt) el.textContent = txt;
+      el.hidden = !parts.length;
     });
     var st = $('#savedTxt');
     if (st) st.textContent = S.updatedAt ? 'Saved on this phone · last change ' + dateShort(S.updatedAt.slice(0, 10)) + ', ' + timeOf(S.updatedAt) : 'Saved automatically on this phone';
@@ -307,6 +356,8 @@
       case 'settings': openSettings(); break;
       case 'jump': var el = $('#tbl-' + tid); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); break;
       case 'paste': openPaste(); break;
+      case 'quick-paste': quickPaste(); break;
+      case 'history': openHistory(); break;
       case 'share-report': shareImage(null); break;
       case 'share-table': shareImage(tid); break;
       case 'pdf': sharePdf(); break;
@@ -336,11 +387,17 @@
   }
   function closeSheet() { if (openBackdrop) { openBackdrop.remove(); openBackdrop = null; } }
   var toastTimer = null;
-  function toast(msg) {
+  function toast(msg, actLabel, onAct, ms) {
     var old = $('.toast'); if (old) old.remove();
-    var t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = msg;
+    var t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status');
+    var span = document.createElement('span'); span.textContent = msg; t.appendChild(span);
+    if (actLabel) {
+      var b = document.createElement('button'); b.className = 'toast-btn'; b.textContent = actLabel;
+      b.addEventListener('click', function () { t.remove(); onAct(); });
+      t.appendChild(b);
+    }
     document.body.appendChild(t);
-    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.remove(); }, 2600);
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.remove(); }, ms || 2600);
   }
   function confirmSheet(title, text, yesLabel, danger, onYes) {
     openSheet(title, '<p class="hint">' + text + '</p><div class="two"><button class="btn btn-light" data-close>Cancel</button><button class="btn ' + (danger ? 'btn-danger' : 'btn-dark') + '" id="yesBtn">' + esc(yesLabel) + '</button></div>',
@@ -382,7 +439,13 @@
 
   /* ---------- new count ---------- */
   function openNewCount() {
-    confirmSheet('Start a new count?', 'All HO and BR numbers will be set to 0 and the date set to today. Your sizes stay as they are.', 'Clear all numbers', true, function () {
+    confirmSheet('Start a new count?', 'This count is kept in <b>Past counts</b> (the clock button at the top). Then all HO and BR numbers go back to 0 and the date is set to today. Your sizes stay as they are.', 'Save & start new', true, function () {
+      if (allCalc().pcs > 0) {
+        S.history = S.history || [];
+        S.history.unshift({ id: Date.now(), date: S.date, savedAt: new Date().toISOString(), tables: clone(S.tables), counts: clone(S.counts) });
+        if (S.history.length > 104) S.history.length = 104;
+      }
+      S.received = {};
       S.counts = blankCounts(S.tables);
       S.date = todayISO();
       touch(); render(); window.scrollTo(0, 0); toast('New count started');
@@ -390,7 +453,7 @@
   }
 
   /* ---------- paste ---------- */
-  function openPaste() {
+  function openPaste(prefill) {
     var canClip = !!(navigator.clipboard && navigator.clipboard.readText);
     openSheet('Paste staff message',
       '<p class="hint">Paste the count your staff sent on WhatsApp. You will see everything before it goes into the table.</p>' +
@@ -403,11 +466,47 @@
           navigator.clipboard.readText().then(function (txt) { ta.value = txt; readIt(); }).catch(function () { toast('Long-press the box and choose Paste'); ta.focus(); });
         });
         $('#readBtn', sh).addEventListener('click', readIt);
-        function readIt() { showPreview(sh, P.parseMessage(ta.value, S.tables.map(function (t) { return { id: t.id, title: t.title, sizes: t.sizes }; }))); }
+        if (prefill) { ta.value = prefill; setTimeout(readIt, 0); }
+        function readIt() { showPreview(sh, parseText(ta.value), ta.value); }
       });
   }
 
-  function showPreview(sh, r) {
+  function parseText(txt) { return P.parseMessage(txt, S.tables.map(function (t) { return { id: t.id, title: t.title, sizes: t.sizes }; })); }
+  function isClean(r) {
+    return r.items.length > 0 && !r.problems.length && !r.shopConflict &&
+      (r.shop || r.items.every(function (i) { return i.shop; })) &&
+      (r.totalStated === null || r.totalStated === r.totalParsed);
+  }
+  // One tap: read the copied WhatsApp message; fill straight away if it is clean, otherwise show the preview.
+  function quickPaste() {
+    if (!(navigator.clipboard && navigator.clipboard.readText)) { openPaste(); return; }
+    navigator.clipboard.readText().then(function (txt) {
+      if (!txt || !txt.trim()) { openPaste(); toast('Nothing copied – paste the message in the box'); return; }
+      var r = parseText(txt);
+      if (isClean(r)) applyItems(r.items, r.shop, txt);
+      else openPaste(txt);
+    }).catch(function () { openPaste(); });
+  }
+  // Android: if clipboard access is already allowed, offer a copied staff message as a banner.
+  function checkClipboard() {
+    var box = $('#clipBanner');
+    if (!box || isStaff() || locked || document.hidden) return;
+    if (!(navigator.permissions && navigator.permissions.query && navigator.clipboard && navigator.clipboard.readText)) return;
+    try {
+      navigator.permissions.query({ name: 'clipboard-read' }).then(function (p) {
+        if (p.state !== 'granted') return;
+        return navigator.clipboard.readText().then(function (txt) {
+          if (!txt || !/al naeem stock count/i.test(txt) || hashStr(txt) === S.lastPasteHash) { box.innerHTML = ''; return; }
+          var r = parseText(txt);
+          box.innerHTML = '<div class="banner">' + ico('clip', '#F3E9D2', 22) + '<span><b>' + (r.shop || 'Staff') + ' count copied</b>' + r.items.length + ' sizes · ' + r.totalParsed + ' pcs</span>' +
+            '<button class="btn btn-gold" data-act="quick-paste">Fill now</button></div>';
+        });
+      }).catch(function () {});
+    } catch (e) { /* not supported */ }
+  }
+  window.addEventListener('focus', function () { setTimeout(checkClipboard, 300); });
+
+  function showPreview(sh, r, rawText) {
     var box = $('#pasteResult', sh);
     var chosen = r.shop;
     var needsShop = r.items.some(function (it) { return !it.shop; });
@@ -443,7 +542,9 @@
           var was = sh2 ? S.counts[t.id][key(it.size)][sh2.toLowerCase()] : null;
           var chg = was !== null && was !== it.count;
           if (chg) changes++;
-          h += '<div class="pv-row' + (chg ? ' chg' : '') + '"><span>' + sizeLabel(it.size) + (it.shop ? '<span class="tag">' + it.shop + '</span>' : '') + (it.dup ? ' <span class="was">(listed twice – last one used)</span>' : '') + '</span>' +
+          var pv = sh2 ? prevVal(t.id, key(it.size), sh2.toLowerCase()) : null;
+          var jmp = isJump(pv, it.count);
+          h += '<div class="pv-row' + (chg ? ' chg' : '') + '"><span>' + sizeLabel(it.size) + (it.shop ? '<span class="tag">' + it.shop + '</span>' : '') + (it.dup ? ' <span class="was">(listed twice – last one used)</span>' : '') + (jmp ? '<span class="jtag">big change · last count ' + pv + '</span>' : '') + '</span>' +
                '<span>' + (chg ? '<span class="was">was ' + was + ' → </span>' : '') + '<b>' + it.count + '</b></span></div>';
         });
         h += '</div>';
@@ -454,53 +555,67 @@
       box.innerHTML = h;
       $$('[data-shop]', box).forEach(function (b) { b.addEventListener('click', function () { chosen = b.getAttribute('data-shop'); draw(); }); });
       var fb = $('#fillBtn', box);
-      if (fb) fb.addEventListener('click', function () { applyItems(r.items, chosen); });
+      if (fb) fb.addEventListener('click', function () { applyItems(r.items, chosen, rawText); });
     }
     draw();
     setTimeout(function () { box.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 30);
   }
 
-  function applyItems(items, chosen) {
-    var flashes = [];
+  function applyItems(items, chosen, rawText) {
+    var before = { counts: clone(S.counts), received: clone(S.received || {}), hash: S.lastPasteHash || '' };
+    var flashes = [], shops = {}, jumps = 0;
     items.forEach(function (it) {
-      var sh = (it.shop || chosen).toLowerCase();
-      S.counts[it.cat][key(it.size)][sh] = it.count;
-      flashes.push(it.cat + '|' + key(it.size) + '|' + sh);
+      var shopU = it.shop || chosen, sh = shopU.toLowerCase(), k = key(it.size);
+      if (isJump(prevVal(it.cat, k, sh), it.count)) jumps++;
+      S.counts[it.cat][k][sh] = it.count;
+      shops[shopU] = true;
+      flashes.push(it.cat + '|' + k + '|' + sh);
     });
+    S.received = S.received || {};
+    Object.keys(shops).forEach(function (sh) { S.received[sh] = { at: new Date().toISOString(), pcs: colTotal(sh) }; });
+    if (rawText) S.lastPasteHash = hashStr(rawText);
     touch(); closeSheet(); render();
     flashes.forEach(function (f) {
       var p = f.split('|');
       var el = $('.cnt[data-t="' + p[0] + '"][data-k="' + p[1] + '"][data-s="' + p[2] + '"]');
       if (el) el.classList.add('flash');
     });
-    toast('Filled ' + items.length + ' sizes' + (chosen ? ' for ' + chosen : ''));
+    var msg = 'Filled ' + Object.keys(shops).join(' & ') + ' · ' + items.length + ' sizes' +
+      (jumps ? ' · ' + jumps + ' big change' + (jumps > 1 ? 's' : '') + ' – check the orange boxes' : '');
+    toast(msg, 'Undo', function () {
+      S.counts = before.counts; S.received = before.received; S.lastPasteHash = before.hash;
+      touch(); render(); toast('Undone');
+    }, 8000);
   }
 
   /* ---------- report data ---------- */
-  function reportTable(t) {
+  function reportTable(t, counts) {
     var rows = t.sizes.map(function (s) {
-      var r = rowCalc(t, s), sub = sizeSub(s);
+      var r = rowCalc(t, s, counts), sub = sizeSub(s);
       return { label: sizeLabel(s) + (sub ? ' (' + sub + ')' : ''), ho: String(r.ho), br: String(r.br), pcs: String(r.pcs), hoG: fmtH(r.hoH), brG: fmtH(r.brH), tG: fmtH(r.tH) };
     });
-    var o = tableCalc(t);
+    var o = tableCalc(t, counts);
     return { title: t.title, rows: rows, tot: { ho: String(o.ho), br: String(o.br), pcs: String(o.pcs), hoG: fmtH(o.hoH), brG: fmtH(o.brH), tG: fmtH(o.tH) }, sumLine: fmtG(o.tH) + ' · ' + o.pcs + ' pcs' };
   }
-  function reportData(tid) {
-    var made = timeNow();
+  function srcTable(src, tid) { for (var i = 0; i < src.tables.length; i++) if (src.tables[i].id === tid) return src.tables[i]; return null; }
+  function reportData(tid, src) {
+    src = src || S;
+    var made = src === S ? 'Made ' + timeNow() : 'Saved ' + timeOf(src.savedAt);
     if (tid) {
-      var t = tableById(tid);
-      return { heading: t.title + ' – Stock', dateLabel: dateShort(S.date), madeLabel: 'Made ' + made, tables: [reportTable(t)], single: true };
+      var t = srcTable(src, tid);
+      return { heading: t.title + ' – Stock', dateLabel: dateShort(src.date), madeLabel: made, tables: [reportTable(t, src.counts)], single: true };
     }
-    var a = allCalc();
+    var a = allCalc(src);
     return {
-      heading: '24K Bullion Stock Report', dateLabel: dateShort(S.date), madeLabel: 'Made ' + made,
+      heading: '24K Bullion Stock Report', dateLabel: dateShort(src.date), madeLabel: made,
       summary: { tg: fmtG(a.tH), pcs: a.pcs + ' pieces', hog: fmtG(a.hoH), ho: a.ho + ' pieces', brg: fmtG(a.brH), br: a.br + ' pieces' },
-      tables: S.tables.map(reportTable), single: false
+      tables: src.tables.map(function (t) { return reportTable(t, src.counts); }), single: false
     };
   }
-  function fileStem(tid) {
-    var name = tid ? tableById(tid).title.replace(/[^A-Za-z0-9]+/g, '-') : 'Stock-Report';
-    return 'Al-Naeem-' + name + '-' + S.date;
+  function fileStem(tid, src) {
+    src = src || S;
+    var name = tid ? srcTable(src, tid).title.replace(/[^A-Za-z0-9]+/g, '-') : 'Stock-Report';
+    return 'Al-Naeem-' + name + '-' + src.date;
   }
 
   /* ---------- sharing ---------- */
@@ -520,14 +635,14 @@
     } else { downloadBlob(file, file.name); toast('Saved to your downloads'); }
   }
 
-  function shareImage(tid) {
+  function shareImage(tid, src) {
     toast('Making image…');
     setTimeout(function () {
-      var canvas = R.draw(reportData(tid));
+      var canvas = R.draw(reportData(tid, src));
       canvas.toBlob(function (blob) {
-        var file = new File([blob], fileStem(tid) + '.png', { type: 'image/png' });
+        var file = new File([blob], fileStem(tid, src) + '.png', { type: 'image/png' });
         var url = URL.createObjectURL(blob);
-        var title = tid ? tableById(tid).title : 'Full report';
+        var title = tid ? srcTable(src || S, tid).title : 'Full report';
         openSheet('Share ' + title,
           '<img class="preview-img" src="' + url + '" alt="Preview of the ' + esc(title) + ' image">' +
           '<div class="stack"><button class="btn btn-gold btn-full" id="goShare">' + ico('share', '#064E3B') + 'Share to WhatsApp</button>' +
@@ -540,12 +655,12 @@
     }, 30);
   }
 
-  function sharePdf() {
+  function sharePdf(src) {
     toast('Making PDF…');
     setTimeout(function () {
-      var canvas = R.draw(reportData(null));
+      var canvas = R.draw(reportData(null, src));
       var blob = R.toPdf(canvas);
-      var file = new File([blob], fileStem(null) + '.pdf', { type: 'application/pdf' });
+      var file = new File([blob], fileStem(null, src) + '.pdf', { type: 'application/pdf' });
       openSheet('Stock report PDF',
         '<div class="pdf-box">' + ico('pdf', '#047857', 34) + '<div><b>' + esc(file.name) + '</b><span>All three tables · ' + Math.max(1, Math.round(blob.size / 1024)) + ' KB</span></div></div>' +
         '<div class="stack"><button class="btn btn-gold btn-full" id="goShare">' + ico('share', '#064E3B') + 'Share to WhatsApp</button>' +
@@ -555,6 +670,42 @@
           $('#goSave', sh).addEventListener('click', function () { downloadBlob(file, file.name); });
         });
     }, 30);
+  }
+
+  /* ---------- past counts ---------- */
+  function openHistory() {
+    var list = S.history || [];
+    var body = list.length ? '<div class="stack">' + list.map(function (hs, i) {
+      var a = allCalc(hs);
+      return '<button class="hist" data-i="' + i + '"><span><b>' + esc(dateLong(hs.date)) + '</b><span>Saved ' + esc(stampLabel(hs.savedAt)) + '</span></span>' +
+        '<span class="r"><b>' + fmtG(a.tH) + '</b><span>' + a.pcs + ' pcs</span></span></button>';
+    }).join('') + '</div>'
+      : '<div class="note info">' + ico('history') + '<span>No past counts yet. When you tap <b>New count</b>, the finished count is kept here so you can re-share it any time.</span></div>';
+    openSheet('Past counts', body, function (sh) {
+      $$('.hist', sh).forEach(function (b) { b.addEventListener('click', function () { openHistoryItem(+b.getAttribute('data-i')); }); });
+    });
+  }
+  function openHistoryItem(i) {
+    var hs = S.history[i]; if (!hs) return;
+    var a = allCalc(hs);
+    var body = '<div class="shops" style="margin-bottom:10px"><div class="shop"><small>BOTH SHOPS</small><b>' + fmtG(a.tH) + '</b><span>' + a.pcs + ' pcs</span></div>' +
+      '<div class="shop"><small>HO · BR</small><b style="font-size:15px">' + fmtG(a.hoH) + ' · ' + fmtG(a.brH) + '</b><span>' + a.ho + ' · ' + a.br + ' pcs</span></div></div>' +
+      '<div class="pv-group" style="margin-bottom:12px">' + hs.tables.map(function (t) {
+        var o = tableCalc(t, hs.counts);
+        return '<div class="pv-row"><span>' + esc(t.title) + '</span><span><b>' + fmtG(o.tH) + '</b> <span class="was">· ' + o.pcs + ' pcs</span></span></div>';
+      }).join('') + '</div>' +
+      '<div class="stack"><button class="btn btn-gold btn-full" id="hImg">' + ico('share', '#064E3B') + 'Share report image</button>' +
+      '<button class="btn btn-light btn-full" id="hPdf">' + ico('pdf') + 'Save PDF</button>' +
+      '<button class="btn btn-danger btn-full" id="hDel">' + ico('trash', '#B42318') + 'Delete this count</button></div>';
+    openSheet(dateLong(hs.date), body, function (sh) {
+      $('#hImg', sh).addEventListener('click', function () { shareImage(null, hs); });
+      $('#hPdf', sh).addEventListener('click', function () { sharePdf(hs); });
+      $('#hDel', sh).addEventListener('click', function () {
+        confirmSheet('Delete this count?', 'The count from ' + esc(dateLong(hs.date)) + ' will be removed from Past counts.', 'Delete', true, function () {
+          S.history.splice(i, 1); persist(); toast('Deleted'); openHistory();
+        });
+      });
+    });
   }
 
   /* ---------- staff ---------- */
@@ -626,7 +777,7 @@
     document.body.style.overflow = 'hidden';
     wirePad(el, function (v, reset) {
       hashPin(v).then(function (h) {
-        if (h === S.pinHash) { el.remove(); locked = false; document.body.style.overflow = ''; }
+        if (h === S.pinHash) { el.remove(); locked = false; document.body.style.overflow = ''; checkClipboard(); }
         else { $('#lockMsg', el).textContent = 'Wrong PIN – try again'; reset(true); }
       });
     });
@@ -639,6 +790,7 @@
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) hiddenAt = Date.now();
     else if (S.pinHash && hiddenAt && Date.now() - hiddenAt > 60000) showLock();
+    if (!document.hidden) setTimeout(checkClipboard, 400);
   });
 
   function pinFlow(title, steps, done) {
@@ -707,5 +859,5 @@
   render();
   if (S.pinHash) showLock();
   if (navigator.storage && navigator.storage.persist) { try { navigator.storage.persist(); } catch (e) {} }
-  window.__stock = { state: function () { return S; }, reportData: reportData, render: render }; // for testing
+  window.__stock = { state: function () { return S; }, reportData: reportData, render: render, applyItems: applyItems, parseText: parseText }; // for testing
 })();
