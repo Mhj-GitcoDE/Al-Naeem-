@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Al Naeem 22K Gross Calculator</title>
+<meta name="theme-color" content="#1f1a12">
+<style>
+  :root {
+    --bg: #f6f2ea; --card: #ffffff; --ink: #1f1a12; --muted: #7a6f5d;
+    --line: #e4dccd; --gold: #b8892b; --gold-soft: #f3e7cc; --ok: #2f7d4f; --bad: #b3412e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #15120d; --card: #201b14; --ink: #f3ede2; --muted: #a99d88;
+            --line: #3a3226; --gold: #d8a845; --gold-soft: #3a2f1a; --ok: #6cc28f; --bad: #e07a66; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         padding: max(16px, env(safe-area-inset-top)) 16px 32px; }
+  main { max-width: 460px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 4px 0 2px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  .card h2 { font-size: 15px; margin: 0 0 12px; color: var(--gold); text-transform: uppercase; letter-spacing: .04em; }
+  label { display: block; font-size: 14px; color: var(--muted); margin: 10px 0 4px; }
+  input { width: 100%; font-size: 22px; padding: 10px 12px; border-radius: 10px;
+          border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+          font-variant-numeric: tabular-nums; }
+  input:focus { outline: 2px solid var(--gold); border-color: transparent; }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; }
+  .result { margin-top: 14px; background: var(--gold-soft); border-radius: 12px; padding: 14px; }
+  .result .k { font-size: 13px; color: var(--muted); }
+  .result .v { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .result .v small { font-size: 18px; font-weight: 600; }
+  .lines { margin-top: 8px; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .lines div { display: flex; justify-content: space-between; padding: 2px 0; }
+  .ok { color: var(--ok); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  button { margin-top: 12px; width: 100%; font-size: 16px; padding: 12px; border-radius: 10px;
+           border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+  button:active { background: var(--gold-soft); }
+  .foot { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>22K Gross Calculator</h1>
+  <p class="sub">Al Naeem Jewellery · metal stock adjustment</p>
+
+  <!-- 1. Main: work out 22K gross from target pure -->
+  <section class="card">
+    <h2>Find 22K gross</h2>
+    <label for="target">Target pure weight (all barcodes) — g</label>
+    <input id="target" inputmode="decimal" placeholder="e.g. 50.264">
+
+    <div class="row">
+      <div>
+        <label for="pureJew">Pure jewellery — g</label>
+        <input id="pureJew" inputmode="decimal" placeholder="0.000">
+      </div>
+      <div>
+        <label for="purity">22K purity</label>
+        <input id="purity" inputmode="decimal" value="0.92">
+      </div>
+    </div>
+
+    <div class="result" id="res1">
+      <div class="k">Enter this 22K gross</div>
+      <div class="v" id="gross1">—</div>
+      <div class="lines" id="lines1"></div>
+    </div>
+    <button id="copy1" type="button">Copy 22K gross</button>
+  </section>
+
+  <!-- 2. Fix: already entered a 22K gross and total is off -->
+  <section class="card">
+    <h2>Fix an entry that's off</h2>
+    <div class="row">
+      <div>
+        <label for="curTotal">Total pure now — g</label>
+        <input id="curTotal" inputmode="decimal" placeholder="e.g. 50.312">
+      </div>
+      <div>
+        <label for="curGross">22K gross now — g</label>
+        <input id="curGross" inputmode="decimal" placeholder="e.g. 12.642">
+      </div>
+    </div>
+    <p class="foot" style="text-align:left;margin:8px 0 0">Uses the target pure and purity from above.</p>
+
+    <div class="result">
+      <div class="k" id="k2">New 22K gross</div>
+      <div class="v" id="gross2">—</div>
+      <div class="lines" id="lines2"></div>
+    </div>
+    <button id="copy2" type="button">Copy new 22K gross</button>
+  </section>
+
+  <button id="clear" type="button">Clear all</button>
+  <p class="foot">Pure jewellery is counted at 1 : 1 (gross = pure). Results rounded to 3 decimals.</p>
+</main>
+
+<script>
+(function () {
+  var ids = ['target', 'pureJew', 'purity', 'curTotal', 'curGross'];
+  var el = {};
+  ids.forEach(function (id) { el[id] = document.getElementById(id); });
+
+  function num(id) {
+    var v = (el[id].value || '').replace(/,/g, '').trim();
+    if (v === '') return null;
+    var n = Number(v);
+    return isFinite(n) ? n : NaN;
+  }
+  function f3(n) { return (Math.round(n * 1000) / 1000).toFixed(3); }
+  function line(k, v, cls) {
+    return '<div><span>' + k + '</span><span' + (cls ? ' class="' + cls + '"' : '') + '>' + v + '</span></div>';
+  }
+
+  var out1 = null, out2 = null;
+
+  function calc() {
+    var target = num('target'), pj = num('pureJew'), p = num('purity');
+    if (pj === null) pj = 0;
+    var gross1 = document.getElementById('gross1'), lines1 = document.getElementById('lines1');
+    out1 = null;
+
+    if (target === null || isNaN(target) || isNaN(pj) || p === null || isNaN(p) || p <= 0 || p > 1) {
+      gross1.textContent = '—';
+      lines1.innerHTML = (p !== null && (isNaN(p) || p <= 0 || p > 1)) ? line('Purity must be between 0 and 1', '', 'bad') : '';
+    } else {
+      var need = target - pj;
+      if (need < 0) {
+        gross1.textContent = '—';
+        lines1.innerHTML = line('Pure jewellery is more than the target', f3(need) + ' g', 'bad');
+      } else {
+        var g = Math.round(need / p * 1000) / 1000;
+        var check = Math.round((g * p + pj) * 1000) / 1000;
+        out1 = f3(g);
+        gross1.innerHTML = out1 + ' <small>g</small>';
+        lines1.innerHTML =
+          line('22K pure needed', f3(need) + ' g') +
+          line('Check: ' + out1 + ' × ' + p + ' + ' + f3(pj), f3(check) + ' g',
+               Math.abs(check - target) < 0.0005 ? 'ok' : 'bad');
+      }
+    }
+
+    // Fix section
+    var ct = num('curTotal'), cg = num('curGross');
+    var gross2 = document.getElementById('gross2'), lines2 = document.getElementById('lines2'), k2 = document.getElementById('k2');
+    out2 = null;
+    if (target === null || ct === null || cg === null || isNaN(target) || isNaN(ct) || isNaN(cg) || !(p > 0 && p <= 1)) {
+      gross2.textContent = '—'; lines2.innerHTML = ''; k2.textContent = 'New 22K gross';
+    } else {
+      var diff = ct - target;                 // + means too much pure
+      var change = Math.round(diff / p * 1000) / 1000;
+      var ng = Math.round((cg - change) * 1000) / 1000;
+      if (ng < 0) {
+        gross2.textContent = '—';
+        lines2.innerHTML = line('Not possible: would need negative 22K', '', 'bad');
+      } else {
+        out2 = f3(ng);
+        gross2.innerHTML = out2 + ' <small>g</small>';
+        var newTotal = Math.round((ct - (cg - ng) * p) * 1000) / 1000;
+        var dir = change > 0 ? 'Reduce 22K by' : (change < 0 ? 'Add to 22K' : 'No change');
+        k2.textContent = 'New 22K gross';
+        lines2.innerHTML =
+          line('Pure off by', (diff > 0 ? '+' : '') + f3(diff) + ' g') +
+          line(dir, f3(Math.abs(change)) + ' g') +
+          line('New total pure', f3(newTotal) + ' g', Math.abs(newTotal - target) < 0.0005 ? 'ok' : 'bad');
+      }
+    }
+
+    try { localStorage.setItem('alnaeem-22k-calc', JSON.stringify(ids.reduce(function (o, id) { o[id] = el[id].value; return o; }, {}))); } catch (e) {}
+  }
+
+  function copy(text, btn, label) {
+    if (!text) return;
+    var done = function () { btn.textContent = 'Copied ' + text; setTimeout(function () { btn.textContent = label; }, 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { fallback(text); done(); });
+    } else { fallback(text); done(); }
+  }
+  function fallback(text) {
+    var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t);
+    t.select(); try { document.execCommand('copy'); } catch (e) {} document.body.removeChild(t);
+  }
+
+  try {
+    var saved = JSON.parse(localStorage.getItem('alnaeem-22k-calc') || 'null');
+    if (saved) ids.forEach(function (id) { if (saved[id] != null && saved[id] !== '') el[id].value = saved[id]; });
+  } catch (e) {}
+
+  ids.forEach(function (id) { el[id].addEventListener('input', calc); });
+  var b1 = document.getElementById('copy1'), b2 = document.getElementById('copy2');
+  b1.addEventListener('click', function () { copy(out1, b1, 'Copy 22K gross'); });
+  b2.addEventListener('click', function () { copy(out2, b2, 'Copy new 22K gross'); });
+  document.getElementById('clear').addEventListener('click', function () {
+    ids.forEach(function (id) { if (id !== 'purity') el[id].value = ''; });
+    calc(); el.target.focus();
+  });
+  calc();
+})();
+</script>
+</body>
+</html>

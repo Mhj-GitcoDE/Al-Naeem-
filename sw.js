@@ -13,7 +13,9 @@ self.addEventListener('activate', function (e) {
 });
 self.addEventListener('fetch', function (e) {
   var req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
+  var url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== location.origin) return;
+  if (url.pathname.indexOf('/gold-calculator/') !== -1) return; /* separate page, not part of the stock app */
   e.respondWith(caches.open(CACHE).then(function (cache) {
     var key = req.mode === 'navigate' ? './index.html' : req;
     return cache.match(key, { ignoreSearch: true }).then(function (hit) {
