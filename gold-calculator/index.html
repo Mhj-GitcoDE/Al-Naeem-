@@ -98,7 +98,7 @@
   </section>
 
   <button id="clear" type="button">Clear all</button>
-  <p class="foot">Pure jewellery is counted at 1 : 1 (gross = pure). Results rounded to 3 decimals.</p>
+  <p class="foot">Comma or point both work (50,264 = 50.264). Pure jewellery is counted at 1 : 1 (gross = pure). Results rounded to 3 decimals.</p>
 </main>
 
 <script>
@@ -108,8 +108,10 @@
   ids.forEach(function (id) { el[id] = document.getElementById(id); });
 
   function num(id) {
-    var v = (el[id].value || '').replace(/,/g, '').trim();
+    // Comma or point both work as the decimal mark (50,264 = 50.264)
+    var v = (el[id].value || '').replace(/\s/g, '').replace(/,/g, '.');
     if (v === '') return null;
+    if ((v.match(/\./g) || []).length > 1) return NaN;
     var n = Number(v);
     return isFinite(n) ? n : NaN;
   }
